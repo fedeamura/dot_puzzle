@@ -1,5 +1,6 @@
-import 'package:dot_puzzle/home.dart';
 import 'package:flutter/material.dart';
+
+import 'screen/home/index.dart';
 
 class CustomApp extends StatefulWidget {
   const CustomApp({Key? key}) : super(key: key);

@@ -1,4 +1,4 @@
-class CustomMathUtils {
+class MathUtils {
   static double map(double x, double in_min, double in_max, double out_min, double out_max) {
     final div = (in_max - in_min);
     if (div == 0) return 0.0;
