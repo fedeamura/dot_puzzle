@@ -1,3 +1,4 @@
+import 'package:dot_puzzle/widget/screen/splash/index.dart';
 import 'package:flutter/material.dart';
 
 import 'screen/home/index.dart';
@@ -12,8 +13,9 @@ class CustomApp extends StatefulWidget {
 class _CustomAppState extends State<CustomApp> {
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: ScreenHome(),
+    return MaterialApp(
+      home: const ScreenHome(),
+      theme: ThemeData.dark(),
     );
   }
 }

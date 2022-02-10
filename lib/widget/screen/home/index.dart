@@ -1,9 +1,12 @@
+import 'package:dot_puzzle/widget/common/animated_count_down/index.dart';
 import 'package:dot_puzzle/widget/common/puzzle/controller.dart';
 import 'package:dot_puzzle/widget/common/puzzle/index.dart';
-import 'package:dot_puzzle/widget/screen/home/title.dart';
-import 'package:dot_puzzle/widget/screen/image_editor/index.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:dot_puzzle/widget/screen/home/bottom_panel.dart';
+import 'package:dot_puzzle/widget/screen/home/left_panel.dart';
+import 'package:dot_puzzle/widget/screen/home/responsive_container.dart';
 import 'package:flutter/material.dart';
+
+import 'app_bar.dart';
 
 class ScreenHome extends StatefulWidget {
   const ScreenHome({Key? key}) : super(key: key);
@@ -13,7 +16,10 @@ class ScreenHome extends StatefulWidget {
 }
 
 class _ScreenHomeState extends State<ScreenHome> {
+  final _key = GlobalKey();
   final _puzzleController = PuzzleController();
+  int _moves = 0;
+  int _correct = 0;
 
   _onButtonSortPressed() {
     _puzzleController.sort();
@@ -23,35 +29,18 @@ class _ScreenHomeState extends State<ScreenHome> {
     _puzzleController.shuffle();
   }
 
-  _onButtonImagePressed() {
-    _puzzleController.convertToImage();
-  }
-
-  _onButtonToNumbersPressed() {
-    _puzzleController.convertToNumbers();
-  }
-
-  _goToImageEditor() {
-    Navigator.of(context).push(CupertinoPageRoute(builder: (context) => const ScreenImage()));
+  _onButtonTogglePressed() {
+    if (_puzzleController.imageMode) {
+      _puzzleController.convertToNumbers();
+    } else {
+      _puzzleController.convertToImage();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      // appBar: AppBar(
-      //   backgroundColor: Colors.transparent,
-      //   elevation: 0,
-      //   actions: [
-      //     IconButton(
-      //       onPressed: _goToImageEditor,
-      //       icon: const Icon(
-      //         Icons.more_vert,
-      //         color: Colors.black,
-      //       ),
-      //     ),
-      //   ],
-      // ),
       body: Container(
         width: double.infinity,
         height: double.infinity,
@@ -59,49 +48,29 @@ class _ScreenHomeState extends State<ScreenHome> {
           bottom: MediaQuery.of(context).viewPadding.bottom,
           top: MediaQuery.of(context).padding.top,
         ),
-        child: Center(
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(height: MediaQuery.of(context).padding.top),
-                const ScreenHomeTitle(),
-                const SizedBox(height: 32),
-                Container(
-                  margin: const EdgeInsets.all(20.0),
-                  child: Center(
-                    child: AspectRatio(
-                      aspectRatio: 1,
-                      child: Puzzle(controller: _puzzleController),
-                    ),
-                  ),
-                ),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  direction: Axis.horizontal,
-                  runSpacing: 8.0,
-                  spacing: 8.0,
-                  children: [
-                    ElevatedButton(
-                      onPressed: _onButtonSortPressed,
-                      child: const Text("Sort"),
-                    ),
-                    ElevatedButton(
-                      onPressed: _onButtonShufflePressed,
-                      child: const Text("Shuffle"),
-                    ),
-                    ElevatedButton(
-                      onPressed: _onButtonImagePressed,
-                      child: const Text("To image"),
-                    ),
-                    ElevatedButton(
-                      onPressed: _onButtonToNumbersPressed,
-                      child: const Text("To numbers"),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+        child: ResponsiveContainer(
+          appbar: ScreenHomeAppBar(
+            onTogglePressed: _onButtonTogglePressed,
+          ),
+          puzzle: Puzzle(
+            controller: _puzzleController,
+            key: _key,
+            onChanged: (moves, correct) {
+              setState(() {
+                _moves = moves;
+                _correct = correct;
+              });
+            },
+          ),
+          leftPanel: ScreenHomeLeftPanel(
+            moves: _moves,
+            correct: _correct,
+            onResetPressed: _onButtonShufflePressed,
+          ),
+          bottomPanel: ScreenHomeBottomPanel(
+            moves: _moves,
+            correct: _correct,
+            onResetPressed: _onButtonShufflePressed,
           ),
         ),
       ),

@@ -3,14 +3,14 @@ import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 
-class ScreenNumber extends StatefulWidget {
-  const ScreenNumber({Key? key}) : super(key: key);
+class ScreenBigNumberEditor extends StatefulWidget {
+  const ScreenBigNumberEditor({Key? key}) : super(key: key);
 
   @override
-  _ScreenNumberState createState() => _ScreenNumberState();
+  _ScreenBigNumberEditorState createState() => _ScreenBigNumberEditorState();
 }
 
-class _ScreenNumberState extends State<ScreenNumber> {
+class _ScreenBigNumberEditorState extends State<ScreenBigNumberEditor> {
   final int _w = 19;
   Color? _color;
   var _colors = <math.Point<int>, Color>{};

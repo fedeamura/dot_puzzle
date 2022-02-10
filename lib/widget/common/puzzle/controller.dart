@@ -7,19 +7,23 @@ class PuzzleController {
     _state = state;
   }
 
-  sort() async {
-    await _state?.sort();
+  sort() {
+    _state?.sort();
   }
 
-  shuffle() async {
-    await _state?.shuffle();
+  shuffle() {
+    _state?.reset();
   }
 
-  convertToImage() async {
-    await _state?.convertToImage();
+  convertToImage() {
+    _state?.convertToImage();
   }
 
-  convertToNumbers() async {
-    await _state?.convertToNumbers();
+  convertToNumbers() {
+    _state?.convertToNumbers();
+  }
+
+  bool get imageMode {
+    return _state?.imageMode ?? false;
   }
 }

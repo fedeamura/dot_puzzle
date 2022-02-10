@@ -1,24 +1,42 @@
+import 'package:dot_puzzle/model/position.dart';
 import 'package:dot_puzzle/model/puzzle_dot.dart';
-import 'dart:math' as math;
 
-class PuzzleModel {
+import 'package:equatable/equatable.dart';
+
+class PuzzleModel extends Equatable {
   final List<PuzzleDotModel> dots;
   final int size;
   final int innerDots;
-  bool imageMode;
+  final bool imageMode;
+  final int moves;
 
-  PuzzleModel({
+  const PuzzleModel({
     required this.dots,
     required this.size,
     required this.innerDots,
     required this.imageMode,
+    required this.moves,
   });
 
-  math.Point<int>? get whiteTilePosition {
+  PuzzleModel copyWith({
+    List<PuzzleDotModel>? dots,
+    bool? imageMode,
+    int? moves,
+  }) {
+    return PuzzleModel(
+      dots: dots ?? this.dots,
+      size: size,
+      innerDots: innerDots,
+      imageMode: imageMode ?? this.imageMode,
+      moves: moves ?? this.moves,
+    );
+  }
+
+  PositionModel<int>? get whiteTilePosition {
     for (int j = 0; j < size; j++) {
       for (int i = 0; i < size; i++) {
-        if (!dots.any((e) => e.currentTileX == i && e.currentTileY == j)) {
-          return math.Point<int>(i, j);
+        if (!dots.any((e) => e.currentTile.x == i && e.currentTile.y == j)) {
+          return PositionModel(x: i, y: j);
         }
       }
     }
@@ -27,11 +45,12 @@ class PuzzleModel {
   }
 
   bool isInCorrectPosition(int x, int y) {
-    return dots.any((e) => e.subX == 0 && e.subY == 0 && e.isInCorrectPosition);
+    final firstDots = dots.where((e) => e.subTile.index == 0).toList();
+    return firstDots.where((e) => e.currentTile.x == x && e.currentTile.y == y && e.isInCorrectPosition).isNotEmpty;
   }
 
   bool canMove(int x, int y) {
-    final touchTilePosition = math.Point<int>(x, y);
+    final touchTilePosition = PositionModel<int>(x: x, y: y);
     final white = whiteTilePosition;
     if (white == null) return false;
     if (white == touchTilePosition) return false;
@@ -39,11 +58,26 @@ class PuzzleModel {
   }
 
   List<PuzzleDotModel> getDots(int x, int y) {
-    return dots.where((e) => e.currentTileX == x && e.currentTileY == y).toList();
+    return dots.where((e) => e.currentTile.x == x && e.currentTile.y == y).toList();
   }
 
   bool get isCompleted {
-    final firsts = dots.where((e) => e.subX == 0 && e.subY == 0);
-    return !firsts.any((e) => !e.isInCorrectPosition);
+    final firstDots = dots.where((e) => e.subTile.index == 0).toList();
+    return !firstDots.any((e) => !e.isInCorrectPosition);
   }
+
+  int get correctTileCount {
+    int count = 0;
+    for (int j = 0; j < size; j++) {
+      for (int i = 0; i < size; i++) {
+        if (isInCorrectPosition(i, j)) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  @override
+  List<Object?> get props => [dots, size, innerDots, imageMode, moves];
 }
