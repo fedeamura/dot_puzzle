@@ -1,45 +1,57 @@
-import 'dart:developer';
+import 'dart:ui';
 
 import 'package:dot_puzzle/model/puzzle.dart';
 import 'package:flutter/material.dart';
 
+import 'index.dart';
+
 class PuzzleDotsPainter extends CustomPainter {
   final PuzzleModel puzzle;
-  final Map<int, Color> colors;
-  final Map<int, Offset> positions;
-  final Map<int, double> opacities;
+  final Map<int, DotData> dotData;
 
   PuzzleDotsPainter({
     required this.puzzle,
-    required this.colors,
-    required this.positions,
-    required this.opacities,
+    required this.dotData,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    double radius = (1 / (puzzle.innerDots * puzzle.size)) * 0.5;
+    double dotSize = (1 / (puzzle.innerDots * puzzle.size));
 
+    final points = <Color, List<Offset>>{};
     for (var dot in puzzle.dots) {
       final index = dot.globalCorrectTile.index;
+      final data = dotData[index];
 
-      final pos = positions[index];
-      final color = colors[index];
-      final opacity = opacities[index] ?? 1.0;
-      if (pos == null || color == null || color == Colors.transparent) {
+      final pos = data?.position;
+      final color = data?.color;
+      final opacity = data?.opacity ?? 1.0;
+      if (pos == null || color == null || color == Colors.transparent || opacity == 0.0) {
         continue;
       }
 
-      canvas.drawCircle(
-        Offset(pos.dx * size.width, pos.dy * size.height),
-        radius * size.shortestSide,
-        Paint()..color = color.withOpacity(opacity),
-      );
+      final c = color.withOpacity(opacity);
+      final dots = points[c] ?? <Offset>[];
+      dots.add(Offset(pos.dx * size.width, pos.dy * size.height));
+      points[c] = dots;
     }
+
+    points.forEach((key, value) {
+      canvas.drawPoints(
+        PointMode.points,
+        value,
+        Paint()
+          ..color = key
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = dotSize * size.shortestSide * 0.8,
+      );
+    });
   }
 
   @override
   bool shouldRepaint(covariant PuzzleDotsPainter oldDelegate) {
-    return oldDelegate.puzzle != puzzle || colors != oldDelegate.colors || positions != oldDelegate.positions || opacities != oldDelegate.opacities;
+    if (oldDelegate.puzzle != puzzle) return true;
+    if (oldDelegate.dotData != dotData) return true;
+    return false;
   }
 }

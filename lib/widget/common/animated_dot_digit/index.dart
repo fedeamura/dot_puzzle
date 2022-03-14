@@ -1,25 +1,28 @@
+// ignore_for_file: invalid_use_of_protected_member
+
 import 'package:dot_puzzle/core/list.dart';
 import 'package:flutter/material.dart';
 
 import 'painter.dart';
 
-class AnimatedPixelDigit extends StatefulWidget {
+class AnimatedDotDigit extends StatefulWidget {
   final int digit;
   final Duration duration;
+  final Color color;
 
-  const AnimatedPixelDigit({
+  const AnimatedDotDigit({
     Key? key,
     required this.digit,
     this.duration = const Duration(seconds: 1),
+    this.color = Colors.white,
   }) : super(key: key);
 
   @override
-  _AnimatedPixelDigitState createState() => _AnimatedPixelDigitState();
+  _AnimatedDotDigitState createState() => _AnimatedDotDigitState();
 }
 
-class _AnimatedPixelDigitState extends State<AnimatedPixelDigit> with SingleTickerProviderStateMixin {
+class _AnimatedDotDigitState extends State<AnimatedDotDigit> with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
-  final _colors = <int, Color>{};
   final _positions = <int, Offset>{};
   final int _size = 7;
 
@@ -30,7 +33,6 @@ class _AnimatedPixelDigitState extends State<AnimatedPixelDigit> with SingleTick
     for (int j = 0; j < _size; j++) {
       for (int i = 0; i < _size; i++) {
         final index = ListUtils.getIndex(i, j, _size);
-        _colors[index] = Colors.white;
         _positions[index] = Offset(i / _size, j / _size);
       }
     }
@@ -47,7 +49,7 @@ class _AnimatedPixelDigitState extends State<AnimatedPixelDigit> with SingleTick
   }
 
   @override
-  void didUpdateWidget(AnimatedPixelDigit oldWidget) {
+  void didUpdateWidget(AnimatedDotDigit oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.digit != oldWidget.digit) {
       _animate(duration: widget.duration);
@@ -751,14 +753,9 @@ class _AnimatedPixelDigitState extends State<AnimatedPixelDigit> with SingleTick
     required int y,
     int? newX,
     int? newY,
-    Color? color,
     double t = 1.0,
   }) {
     final index = ListUtils.getIndex(x, y, _size);
-
-    final oldColor = _colors[index] ?? Colors.transparent;
-    final newColor = color ?? _colors[index] ?? Colors.transparent;
-    _colors[index] = Color.lerp(oldColor, newColor, t)!;
 
     final oldOffset = _positions[index] ?? Offset.zero;
     final newPosition = Offset((newX ?? x) / _size, (newY ?? y) / _size);
@@ -769,10 +766,10 @@ class _AnimatedPixelDigitState extends State<AnimatedPixelDigit> with SingleTick
   Widget build(BuildContext context) {
     return CustomPaint(
       willChange: true,
-      painter: AnimatedPixelDigitPainter(
-        colors: _colors,
+      painter: AnimatedDotDigitPainter(
+        color: widget.color,
         positions: _positions,
-        size: _size,
+        length: _size,
       ),
       child: Container(),
     );

@@ -1,6 +1,7 @@
 import 'package:dot_puzzle/model/puzzle.dart';
-import 'package:dot_puzzle/model/puzzle_dot.dart';
 import 'package:flutter/material.dart';
+
+import 'model/move_result.dart';
 
 abstract class PuzzleService {
   Future<void> init();
@@ -14,6 +15,8 @@ abstract class PuzzleService {
   PuzzleModel convertToImage(PuzzleModel model);
 
   PuzzleModel convertToNumbers(PuzzleModel model);
+
+  PuzzleMoveResult move(PuzzleModel model, int x, int y);
 
   Map<int, Color> getNumberRepresentation(int number);
 }

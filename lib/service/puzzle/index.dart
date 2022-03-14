@@ -7,8 +7,11 @@ import 'package:dot_puzzle/model/puzzle.dart';
 import 'package:dot_puzzle/model/puzzle_dot.dart';
 import 'package:dot_puzzle/model/tile.dart';
 import 'package:dot_puzzle/service/puzzle/_interface.dart';
+import 'package:dot_puzzle/service/puzzle/model/move_result.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import 'model/move_direction.dart';
 
 class PuzzleServiceImpl extends PuzzleService {
   final _numbersValues = <int, Map<int, Color>>{};
@@ -225,76 +228,6 @@ class PuzzleServiceImpl extends PuzzleService {
     return model.copyWith(dots: newDots);
   }
 
-  // @override
-  // PuzzleModel updateDotsColor(PuzzleModel model, List<PuzzleDotModel> dots, {Color? color, double t = 1.0}) {
-  //   final editedDots = <String, PuzzleDotModel>{};
-  //   for (var dot in dots) {
-  //     Color newColor;
-  //     if (color != null) {
-  //       newColor = color;
-  //     } else {
-  //       if (model.imageMode) {
-  //         newColor = dot.imageColor;
-  //       } else {
-  //         if (dot.isNumber) {
-  //           newColor = dot.numberColor;
-  //         } else {
-  //           if (dot.isInCorrectPosition) {
-  //             newColor = dot.correctColor;
-  //           } else {
-  //             newColor = dot.incorrectColor;
-  //           }
-  //         }
-  //       }
-  //     }
-  //     editedDots[dot.id] = dot.copyWith(
-  //       color: Color.lerp(dot.color, newColor, Curves.decelerate.transform(t)),
-  //     );
-  //   }
-  //
-  //   return model.copyWith(
-  //     dots: model.dots.map((e) => editedDots[e.id] ?? e).toList(),
-  //   );
-  // }
-  //
-  // @override
-  // PuzzleModel updateDotsPosition(
-  //   PuzzleModel model, {
-  //   Offset? focusPosition,
-  //   double t = 1.0,
-  // }) {
-  //   double delta = 1.5;
-  //   double f = 0.05;
-  //   double shimmer = 0.3;
-  //
-  //   for (var dot in model.dots) {
-  //     final currentPosition = Offset(dot.positionX, dot.positionY);
-  //     final correctPosition = dot.getCurrentPosition(model.size, model.innerDots);
-  //     Offset newPosition = correctPosition;
-  //
-  //     double opacity = 1.0;
-  //     if (focusPosition != null) {
-  //       final distance = (focusPosition - currentPosition).distance;
-  //       if (distance < delta) {
-  //         final distancePercentage = distance / delta;
-  //         final force = f * (1 - (distancePercentage));
-  //         final x = correctPosition.dx - focusPosition.dx;
-  //         final y = correctPosition.dy - focusPosition.dy;
-  //         final angle = math.atan(y / x) - (correctPosition.dx < focusPosition.dx ? math.pi : 0.0);
-  //         newPosition = correctPosition + Offset(math.cos(angle) * force, math.sin(angle) * force);
-  //
-  //         if (distancePercentage < shimmer) {
-  //           opacity = Curves.easeInOut.transform(MathUtils.map(distancePercentage, 0, shimmer, 0.0, 1.0));
-  //         }
-  //       }
-  //     }
-  //
-  //     dot.positionX = lerpDouble(currentPosition.dx, newPosition.dx, Curves.decelerate.transform(t))!;
-  //     dot.positionY = lerpDouble(currentPosition.dy, newPosition.dy, Curves.decelerate.transform(t))!;
-  //     dot.opacity = lerpDouble(dot.opacity, opacity, Curves.decelerate.transform(t))!;
-  //   }
-  // }
-
   @override
   PuzzleModel convertToImage(PuzzleModel model) {
     final dots = model.dots.map((dot) {
@@ -317,5 +250,89 @@ class PuzzleServiceImpl extends PuzzleService {
   @override
   Map<int, Color> getNumberRepresentation(int number) {
     return _numbersValues[number] ?? <int, Color>{};
+  }
+
+  @override
+  PuzzleMoveResult move(PuzzleModel model, int x, int y) {
+    final whiteTilePosition = model.whiteTilePosition;
+
+    if (whiteTilePosition == null || !model.canMove(x, y)) {
+      return PuzzleMoveResult(model: model);
+    }
+
+    final touchTilePosition = PositionModel<int>(x: x, y: y);
+    bool horizontalReorder = whiteTilePosition.y == touchTilePosition.y;
+    bool reverse = false;
+    PuzzleMoveDirection moveDirection;
+    int deltaX;
+    int deltaY;
+    List<PuzzleDotModel> movedDots;
+
+    if (horizontalReorder) {
+      int from, to;
+      if (whiteTilePosition.x < touchTilePosition.x) {
+        moveDirection = PuzzleMoveDirection.left;
+        reverse = true;
+        from = whiteTilePosition.x + 1;
+        to = touchTilePosition.x;
+      } else {
+        moveDirection = PuzzleMoveDirection.right;
+        from = touchTilePosition.x;
+        to = whiteTilePosition.x - 1;
+      }
+      movedDots = model.dots.where((e) => e.currentTile.y == whiteTilePosition.y && e.currentTile.x >= from && e.currentTile.x <= to).toList();
+    } else {
+      int from, to;
+      if (whiteTilePosition.y < touchTilePosition.y) {
+        reverse = true;
+        moveDirection = PuzzleMoveDirection.up;
+        from = whiteTilePosition.y + 1;
+        to = touchTilePosition.y;
+      } else {
+        moveDirection = PuzzleMoveDirection.down;
+        from = touchTilePosition.y;
+        to = whiteTilePosition.y - 1;
+      }
+      movedDots = model.dots.where((e) => e.currentTile.x == whiteTilePosition.x && e.currentTile.y >= from && e.currentTile.y <= to).toList();
+    }
+
+    deltaX = (!horizontalReorder ? 0 : (reverse ? -1 : 1));
+    deltaY = (horizontalReorder ? 0 : (reverse ? -1 : 1));
+
+    final editedDots = <int, PuzzleDotModel>{};
+    final newCorrectDots = <PuzzleDotModel>[];
+    final newIncorrectDots = <PuzzleDotModel>[];
+
+    for (var dot in movedDots) {
+      final index = dot.globalCorrectTile.index;
+
+      int currentTileX = dot.currentTile.x + deltaX;
+      int currentTileY = dot.currentTile.y + deltaY;
+      int newTileIndex = ListUtils.getIndex(currentTileX, currentTileY, model.size);
+
+      final editedDot = dot.copyWith(currentTileIndex: newTileIndex);
+      if (dot.isInCorrectPosition != editedDot.isInCorrectPosition) {
+        if (editedDot.isInCorrectPosition) {
+          newCorrectDots.add(editedDot);
+        } else {
+          newIncorrectDots.add(editedDot);
+        }
+      }
+      editedDots[index] = editedDot;
+    }
+
+    return PuzzleMoveResult(
+      model: model.copyWith(
+        dots: model.dots.map((dot) {
+          final index = dot.globalCorrectTile.index;
+          return editedDots[index] ?? dot;
+        }).toList(),
+        moves: model.moves + 1,
+      ),
+      moveDirection: moveDirection,
+      movedDots: movedDots,
+      newCorrectDots: newCorrectDots,
+      newIncorrectDots: newIncorrectDots,
+    );
   }
 }

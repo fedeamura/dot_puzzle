@@ -78,6 +78,10 @@ class PuzzleModel extends Equatable {
     return count;
   }
 
+  int get correctTilesLeft {
+    return (size * size) - 1 - correctTileCount;
+  }
+
   @override
   List<Object?> get props => [dots, size, innerDots, imageMode, moves];
 }

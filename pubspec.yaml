@@ -18,7 +18,13 @@ dependencies:
   http: ^0.13.4
   image: ^3.1.1
   debounce_throttle: ^2.0.0
+  easy_debounce: ^2.0.2+1
   fast_noise: ^1.0.1
+  multi_value_listenable_builder: ^0.0.2
+  vibration: 1.7.4-nullsafety.0
+  just_audio: ^0.9.20
+  google_fonts: ^2.3.1
+  confetti: ^0.6.0
 
 
 dev_dependencies:
@@ -29,6 +35,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/numbers.json
-    - assets/images.json
-    - assets/images/yellow.png
+    - assets/
+    - assets/images/
+    - assets/audio/

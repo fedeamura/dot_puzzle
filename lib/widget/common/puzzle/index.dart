@@ -1,28 +1,34 @@
-import 'dart:developer';
+// ignore_for_file: invalid_use_of_protected_member
+
 import 'dart:ui';
 
 import 'package:debounce_throttle/debounce_throttle.dart';
-import 'package:dot_puzzle/core/list.dart';
 import 'package:dot_puzzle/core/math.dart';
+import 'package:dot_puzzle/model/position.dart';
 import 'package:dot_puzzle/model/puzzle.dart';
 import 'package:dot_puzzle/model/puzzle_dot.dart';
 import 'package:dot_puzzle/service/puzzle/_interface.dart';
+import 'package:dot_puzzle/service/puzzle/model/move_direction.dart';
 import 'package:dot_puzzle/widget/common/puzzle/controller.dart';
+import 'package:easy_debounce/easy_debounce.dart';
+import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
+import 'package:multi_value_listenable_builder/multi_value_listenable_builder.dart';
 import 'dart:math' as math;
 
 import 'painter.dart';
 
-enum MoveDirection {
-  up,
-  down,
-  left,
-  right,
-}
+typedef OnPuzzleTap = Function({
+  required PuzzleModel model,
+  required PositionModel<int> position,
+  required bool moved,
+  required bool successMoved,
+});
 
-enum RoundedCorner {
+enum _PuzzleRoundedCorner {
   topLeft,
   topRight,
   bottomLeft,
@@ -31,12 +37,16 @@ enum RoundedCorner {
 
 class Puzzle extends StatefulWidget {
   final PuzzleController? controller;
-  final Function(int moves, int correct)? onChanged;
+  final Function(PuzzleModel model)? onChanged;
+  final OnPuzzleTap? onPuzzleTap;
+  final FocusNode? focusNode;
 
   const Puzzle({
     Key? key,
     this.controller,
     this.onChanged,
+    this.onPuzzleTap,
+    this.focusNode,
   }) : super(key: key);
 
   @override
@@ -44,11 +54,10 @@ class Puzzle extends StatefulWidget {
 }
 
 class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
-  late PuzzleModel _model;
-  late Map<int, Color> _colors;
-  late Map<int, Offset> _positions;
-  late Map<int, double> _opacities;
+  final _model = ValueNotifier<PuzzleModel?>(null);
+  final _dotData = ValueNotifier<Map<int, DotData>>(<int, DotData>{});
 
+  late FocusNode _focusNode;
   late PuzzleController _controller;
   late AnimationController _animationControllerPosition;
   late AnimationController _animationControllerColor;
@@ -67,13 +76,34 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
 
   Duration get _touchUpDuration => const Duration(milliseconds: 150);
 
-  Duration get _hoverDuration => Duration(milliseconds: ((1 / 20) * 1000).floor());
+  late Duration _throttleDuration;
 
-  bool get imageMode => _model.imageMode;
+  bool get imageMode => _model.value!.imageMode;
+
+  bool _throttleEnabled = false;
 
   @override
   void initState() {
-    _throttle = Throttle<Offset?>(_hoverDuration, initialValue: null);
+    _focusNode = widget.focusNode ?? FocusNode();
+
+    if (kIsWeb) {
+      _throttleDuration = Duration(milliseconds: ((1 / 10) * 1000).floor());
+    } else {
+      _throttleDuration = Duration(milliseconds: ((1 / 30) * 1000).floor());
+    }
+
+    _throttle = Throttle<Offset?>(_throttleDuration, initialValue: null);
+    _throttle.values.listen((event) {
+      if (!_throttleEnabled) {
+        return;
+      }
+
+      if (event == null) {
+        return;
+      }
+
+      _onMove(event);
+    });
 
     _animationControllerPosition = AnimationController(vsync: this);
     _animationControllerColor = AnimationController(vsync: this);
@@ -82,33 +112,35 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
     _controller.attach(this);
 
     final PuzzleService service = GetIt.I.get();
-    _model = service.create();
-    _colors = <int, Color>{};
-    _positions = <int, Offset>{};
-    _opacities = <int, double>{};
+    _model.value = service.create();
+    final dotData = <int, DotData>{};
+    for (var dot in _model.value!.dots) {
+      dotData[dot.globalCorrectTile.index] = const DotData(
+        opacity: 1.0,
+        position: Offset.zero,
+        color: Colors.transparent,
+      );
+    }
+    _dotData.value = dotData;
     _animateDotsPosition();
     _animateDotsColor();
 
-    _throttle.values.listen((event) {
-      if (event != null) {
-        _onPointerMove(event);
-      }
-    });
-
-    WidgetsBinding.instance?.addPostFrameCallback((timeStamp) {
-      widget.onChanged?.call(_model.moves, _model.correctTileCount);
-    });
+    WidgetsBinding.instance?.addPostFrameCallback((timeStamp) => widget.onChanged?.call(_model.value!));
     super.initState();
   }
 
   @override
   void dispose() {
+    if (widget.focusNode == null) {
+      _focusNode.dispose();
+    }
+
     _controller.attach(null);
     _animationControllerPosition.dispose();
     super.dispose();
   }
 
-  _onPointerMove(Offset position) {
+  _onMove(Offset position) {
     _touchPosition = position;
 
     if (_touchStartAt == null) {
@@ -138,145 +170,73 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
     }
   }
 
-  _onPointerExit() {
-    _touchStartAt = null;
-    _animateDotsPosition(duration: _moveDuration);
-  }
-
-  _onPointerUp({bool close = true}) async {
-    log("Up start $close");
-
-    if (_touchPosition == null || _touchStartAt == null) {
-      log("Up. No touch position or touch start");
-      return;
+  _onTileClick(Offset offset) async {
+    Offset? focusPosition;
+    if (_touchPosition != null) {
+      focusPosition = Offset(
+        _touchPosition!.dx / _constraints.maxWidth,
+        _touchPosition!.dy / _constraints.maxHeight,
+      );
     }
-
-    final focusPosition = Offset(
-      _touchPosition!.dx / _constraints.maxWidth,
-      _touchPosition!.dy / _constraints.maxHeight,
-    );
 
     final millisecondsFromStart = DateTime.now().millisecondsSinceEpoch - (_touchStartAt?.millisecondsSinceEpoch ?? 0);
     if (millisecondsFromStart < 300) {
-      log("Start fix click");
-      _throttle.setValue(null);
-      await Future.delayed(const Duration(milliseconds: 1));
       await _animateDotsPosition(
-        focusPosition: focusPosition,
+        focusPosition: Offset(
+          offset.dx / _constraints.maxWidth,
+          offset.dy / _constraints.maxHeight,
+        ),
         duration: _touchUpDuration,
       );
-      log("End fix click");
     }
 
-    _touchStartAt = null;
-
-    final whiteTilePosition = _model.whiteTilePosition;
-    final touchTilePosition = _touchTilePosition();
+    final whiteTilePosition = _model.value!.whiteTilePosition;
+    final touchTilePosition = PositionModel<int>(
+      x: ((offset.dx / _constraints.maxWidth) * _model.value!.size).floor(),
+      y: ((offset.dy / _constraints.maxHeight) * _model.value!.size).floor(),
+    );
 
     // Exit
-    if (whiteTilePosition == null || touchTilePosition == null) {
-      log("Exit. There is no white tile position or touch tile position");
+    if (whiteTilePosition == null) {
       _animateDotsPosition(
         duration: _touchDownDuration,
-        focusPosition: close ? null : focusPosition,
+        focusPosition: focusPosition,
+      );
+
+      widget.onPuzzleTap?.call(
+        model: _model.value!,
+        position: touchTilePosition,
+        moved: false,
+        successMoved: false,
       );
       return;
     }
 
-    bool shouldReorder = _model.canMove(touchTilePosition.x, touchTilePosition.y);
-    bool horizontalReorder = whiteTilePosition.y == touchTilePosition.y;
+    final PuzzleService service = GetIt.I.get();
+    final moveResult = service.move(_model.value!, touchTilePosition.x, touchTilePosition.y);
+    _model.value = moveResult.model;
 
-    final size = _model.size;
-    int deltaX = 0;
-    int deltaY = 0;
-    int from = 0;
-    int to = 0;
-    final changeColorDots = <PuzzleDotModel>[];
-    MoveDirection moveDirection = MoveDirection.right;
-
-    if (shouldReorder) {
-      bool reverse = false;
-
-      if (horizontalReorder) {
-        if (whiteTilePosition.x < touchTilePosition.x) {
-          moveDirection = MoveDirection.left;
-          reverse = true;
-          from = whiteTilePosition.x + 1;
-          to = touchTilePosition.x;
-        } else {
-          moveDirection = MoveDirection.right;
-          from = touchTilePosition.x;
-          to = whiteTilePosition.x - 1;
-        }
-      } else {
-        if (whiteTilePosition.y < touchTilePosition.y) {
-          reverse = true;
-          moveDirection = MoveDirection.up;
-          from = whiteTilePosition.y + 1;
-          to = touchTilePosition.y;
-        } else {
-          moveDirection = MoveDirection.down;
-          from = touchTilePosition.y;
-          to = whiteTilePosition.y - 1;
-        }
-      }
-
-      deltaX = (!horizontalReorder ? 0 : (reverse ? -1 : 1));
-      deltaY = (horizontalReorder ? 0 : (reverse ? -1 : 1));
-
-      List<PuzzleDotModel> movedDots;
-      if (horizontalReorder) {
-        movedDots = _model.dots.where((e) => e.currentTile.y == whiteTilePosition.y && e.currentTile.x >= from && e.currentTile.x <= to).toList();
-      } else {
-        movedDots = _model.dots.where((e) => e.currentTile.x == whiteTilePosition.x && e.currentTile.y >= from && e.currentTile.y <= to).toList();
-      }
-
-      final editedDots = <int, PuzzleDotModel>{};
-
-      for (var dot in movedDots) {
-        final index = dot.globalCorrectTile.index;
-
-        int currentTileX = dot.currentTile.x + deltaX;
-        int currentTileY = dot.currentTile.y + deltaY;
-        int newTileIndex = ListUtils.getIndex(currentTileX, currentTileY, size);
-
-        final editedDot = dot.copyWith(currentTileIndex: newTileIndex);
-        if (dot.isInCorrectPosition != editedDot.isInCorrectPosition) {
-          changeColorDots.add(editedDot);
-        }
-        editedDots[index] = editedDot;
-      }
-
-      _model = _model.copyWith(
-        dots: _model.dots.map((dot) {
-          final index = dot.globalCorrectTile.index;
-          return editedDots[index] ?? dot;
-        }).toList(),
-        moves: _model.moves + 1,
-      );
-      widget.onChanged?.call(_model.moves, _model.correctTileCount);
-    }
-
-    // Animate colors
-    if (shouldReorder && !_model.imageMode && changeColorDots.isNotEmpty) {
+    if (moveResult.newIncorrectDots.isNotEmpty || moveResult.newCorrectDots.isNotEmpty) {
       _animateDotsColor(
         duration: _colorDuration,
-        moveDirection: moveDirection,
+        moveDirection: moveResult.moveDirection ?? PuzzleMoveDirection.left,
       );
     }
 
     // Restore positions
     _animateDotsPosition(
       duration: _moveDuration,
-      focusPosition: close ? null : focusPosition,
+      focusPosition: focusPosition,
     );
-  }
 
-  math.Point<int>? _touchTilePosition() {
-    if (_touchPosition == null) return null;
-    final x = _touchPosition!.dx / _constraints.maxWidth;
-    final y = _touchPosition!.dy / _constraints.maxHeight;
-    return math.Point<int>((x * _model.size).floor(), (y * _model.size).floor());
+    widget.onPuzzleTap?.call(
+      model: _model.value!,
+      position: touchTilePosition,
+      moved: moveResult.moveDirection != null,
+      successMoved: moveResult.newCorrectDots.isNotEmpty,
+    );
+
+    widget.onChanged?.call(_model.value!);
   }
 
   _animateDotsPosition({
@@ -287,13 +247,18 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
     listener() {
       final _t = duration == Duration.zero ? t : _animationControllerPosition.value;
       const delta = 1.5;
-      const f = 0.1;
-      const shimmer = 0.3;
-      var white = _model.whiteTilePosition;
+      const f = 0.03;
+      const shimmer = 0.2;
+      final size = _model.value!.size;
+      final innerDots = _model.value!.innerDots;
+      var white = _model.value!.whiteTilePosition;
 
-      for (var dot in _model.dots) {
+      final dotData = _dotData.value;
+
+      for (var dot in _model.value!.dots) {
         final index = dot.globalCorrectTile.index;
-        final currentPosition = _positions[index] ?? Offset.zero;
+        var data = dotData[index];
+        final currentPosition = data?.position ?? Offset.zero;
         var newPosition = Offset(dot.currentPosition.x, dot.currentPosition.y);
 
         double opacity = 1.0;
@@ -305,55 +270,56 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
             final x = newPosition.dx - focusPosition.dx;
             final y = newPosition.dy - focusPosition.dy;
             final angle = math.atan(y / x) - (newPosition.dx < focusPosition.dx ? math.pi : 0.0);
-            newPosition = newPosition + Offset(math.cos(angle) * force, math.sin(angle) * force);
+            newPosition = newPosition + Offset((math.cos(angle) * force), math.sin(angle) * force);
+
             if (distancePercentage < shimmer) {
               opacity = Curves.easeInOut.transform(MathUtils.map(distancePercentage, 0, shimmer, 0.0, 1.0));
             }
           }
         }
 
-        final roundedCorners = <RoundedCorner>[];
+        final roundedCorners = <_PuzzleRoundedCorner>[];
         if (dot.currentTile.x == 0 && dot.currentTile.y == 0) {
-          roundedCorners.add(RoundedCorner.topLeft);
+          roundedCorners.add(_PuzzleRoundedCorner.topLeft);
         }
 
-        if (dot.currentTile.x == 0 && dot.currentTile.y == _model.size - 1) {
-          roundedCorners.add(RoundedCorner.bottomLeft);
+        if (dot.currentTile.x == 0 && dot.currentTile.y == size - 1) {
+          roundedCorners.add(_PuzzleRoundedCorner.bottomLeft);
         }
 
-        if (dot.currentTile.x == _model.size - 1 && dot.currentTile.y == 0) {
-          roundedCorners.add(RoundedCorner.topRight);
+        if (dot.currentTile.x == size - 1 && dot.currentTile.y == 0) {
+          roundedCorners.add(_PuzzleRoundedCorner.topRight);
         }
 
-        if (dot.currentTile.x == _model.size - 1 && dot.currentTile.y == _model.size - 1) {
-          roundedCorners.add(RoundedCorner.bottomRight);
+        if (dot.currentTile.x == size - 1 && dot.currentTile.y == size - 1) {
+          roundedCorners.add(_PuzzleRoundedCorner.bottomRight);
         }
 
         if (white != null &&
             ((white.y == 0 && white.x == dot.currentTile.x + 1 && white.y == dot.currentTile.y) ||
-                (white.x == _model.size - 1 && white.y == dot.currentTile.y - 1 && white.x == dot.currentTile.x))) {
-          roundedCorners.add(RoundedCorner.topRight);
+                (white.x == size - 1 && white.y == dot.currentTile.y - 1 && white.x == dot.currentTile.x))) {
+          roundedCorners.add(_PuzzleRoundedCorner.topRight);
         }
 
         if (white != null &&
             ((white.y == 0 && white.x == dot.currentTile.x - 1 && white.y == dot.currentTile.y) ||
                 (white.x == 0 && white.y == dot.currentTile.y - 1 && white.x == dot.currentTile.x))) {
-          roundedCorners.add(RoundedCorner.topLeft);
+          roundedCorners.add(_PuzzleRoundedCorner.topLeft);
         }
 
         if (white != null &&
-            ((white.y == _model.size - 1 && white.x == dot.currentTile.x + 1 && white.y == dot.currentTile.y) ||
-                (white.x == _model.size - 1 && white.y == dot.currentTile.y + 1 && white.x == dot.currentTile.x))) {
-          roundedCorners.add(RoundedCorner.bottomRight);
+            ((white.y == size - 1 && white.x == dot.currentTile.x + 1 && white.y == dot.currentTile.y) ||
+                (white.x == size - 1 && white.y == dot.currentTile.y + 1 && white.x == dot.currentTile.x))) {
+          roundedCorners.add(_PuzzleRoundedCorner.bottomRight);
         }
 
         if (white != null &&
-            ((white.y == _model.size - 1 && white.x == dot.currentTile.x - 1 && white.y == dot.currentTile.y) ||
+            ((white.y == size - 1 && white.x == dot.currentTile.x - 1 && white.y == dot.currentTile.y) ||
                 (white.x == 0 && white.y == dot.currentTile.y + 1 && white.x == dot.currentTile.x))) {
-          roundedCorners.add(RoundedCorner.bottomLeft);
+          roundedCorners.add(_PuzzleRoundedCorner.bottomLeft);
         }
 
-        if (roundedCorners.any((e) => e == RoundedCorner.topLeft)) {
+        if (roundedCorners.any((e) => e == _PuzzleRoundedCorner.topLeft)) {
           if (dot.subTile.x == 0 && dot.subTile.y == 0) opacity = 0;
           if (dot.subTile.x == 1 && dot.subTile.y == 0) opacity = 0;
           if (dot.subTile.x == 2 && dot.subTile.y == 0) opacity = 0;
@@ -364,46 +330,52 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
           if (dot.subTile.x == 0 && dot.subTile.y == 3) opacity = 0;
         }
 
-        if (roundedCorners.any((e) => e == RoundedCorner.topRight)) {
-          if (dot.subTile.x == _model.innerDots - 1 && dot.subTile.y == 0) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 2 && dot.subTile.y == 0) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 3 && dot.subTile.y == 0) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 4 && dot.subTile.y == 0) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 1 && dot.subTile.y == 1) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 2 && dot.subTile.y == 1) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 1 && dot.subTile.y == 2) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 1 && dot.subTile.y == 3) opacity = 0;
+        if (roundedCorners.any((e) => e == _PuzzleRoundedCorner.topRight)) {
+          if (dot.subTile.x == innerDots - 1 && dot.subTile.y == 0) opacity = 0;
+          if (dot.subTile.x == innerDots - 2 && dot.subTile.y == 0) opacity = 0;
+          if (dot.subTile.x == innerDots - 3 && dot.subTile.y == 0) opacity = 0;
+          if (dot.subTile.x == innerDots - 4 && dot.subTile.y == 0) opacity = 0;
+          if (dot.subTile.x == innerDots - 1 && dot.subTile.y == 1) opacity = 0;
+          if (dot.subTile.x == innerDots - 2 && dot.subTile.y == 1) opacity = 0;
+          if (dot.subTile.x == innerDots - 1 && dot.subTile.y == 2) opacity = 0;
+          if (dot.subTile.x == innerDots - 1 && dot.subTile.y == 3) opacity = 0;
         }
 
-        if (roundedCorners.any((e) => e == RoundedCorner.bottomLeft)) {
-          if (dot.subTile.x == 0 && dot.subTile.y == _model.innerDots - 1) opacity = 0;
-          if (dot.subTile.x == 1 && dot.subTile.y == _model.innerDots - 1) opacity = 0;
-          if (dot.subTile.x == 2 && dot.subTile.y == _model.innerDots - 1) opacity = 0;
-          if (dot.subTile.x == 3 && dot.subTile.y == _model.innerDots - 1) opacity = 0;
-          if (dot.subTile.x == 0 && dot.subTile.y == _model.innerDots - 2) opacity = 0;
-          if (dot.subTile.x == 1 && dot.subTile.y == _model.innerDots - 2) opacity = 0;
-          if (dot.subTile.x == 0 && dot.subTile.y == _model.innerDots - 3) opacity = 0;
-          if (dot.subTile.x == 0 && dot.subTile.y == _model.innerDots - 4) opacity = 0;
+        if (roundedCorners.any((e) => e == _PuzzleRoundedCorner.bottomLeft)) {
+          if (dot.subTile.x == 0 && dot.subTile.y == innerDots - 1) opacity = 0;
+          if (dot.subTile.x == 1 && dot.subTile.y == innerDots - 1) opacity = 0;
+          if (dot.subTile.x == 2 && dot.subTile.y == innerDots - 1) opacity = 0;
+          if (dot.subTile.x == 3 && dot.subTile.y == innerDots - 1) opacity = 0;
+          if (dot.subTile.x == 0 && dot.subTile.y == innerDots - 2) opacity = 0;
+          if (dot.subTile.x == 1 && dot.subTile.y == innerDots - 2) opacity = 0;
+          if (dot.subTile.x == 0 && dot.subTile.y == innerDots - 3) opacity = 0;
+          if (dot.subTile.x == 0 && dot.subTile.y == innerDots - 4) opacity = 0;
         }
 
-        if (roundedCorners.any((e) => e == RoundedCorner.bottomRight)) {
-          if (dot.subTile.x == _model.innerDots - 1 && dot.subTile.y == _model.innerDots - 1) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 2 && dot.subTile.y == _model.innerDots - 1) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 3 && dot.subTile.y == _model.innerDots - 1) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 4 && dot.subTile.y == _model.innerDots - 1) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 1 && dot.subTile.y == _model.innerDots - 2) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 2 && dot.subTile.y == _model.innerDots - 2) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 1 && dot.subTile.y == _model.innerDots - 3) opacity = 0;
-          if (dot.subTile.x == _model.innerDots - 1 && dot.subTile.y == _model.innerDots - 4) opacity = 0;
+        if (roundedCorners.any((e) => e == _PuzzleRoundedCorner.bottomRight)) {
+          if (dot.subTile.x == innerDots - 1 && dot.subTile.y == innerDots - 1) opacity = 0;
+          if (dot.subTile.x == innerDots - 2 && dot.subTile.y == innerDots - 1) opacity = 0;
+          if (dot.subTile.x == innerDots - 3 && dot.subTile.y == innerDots - 1) opacity = 0;
+          if (dot.subTile.x == innerDots - 4 && dot.subTile.y == innerDots - 1) opacity = 0;
+          if (dot.subTile.x == innerDots - 1 && dot.subTile.y == innerDots - 2) opacity = 0;
+          if (dot.subTile.x == innerDots - 2 && dot.subTile.y == innerDots - 2) opacity = 0;
+          if (dot.subTile.x == innerDots - 1 && dot.subTile.y == innerDots - 3) opacity = 0;
+          if (dot.subTile.x == innerDots - 1 && dot.subTile.y == innerDots - 4) opacity = 0;
         }
 
-        final newX = lerpDouble(currentPosition.dx, newPosition.dx, Curves.decelerate.transform(_t))!;
-        final newY = lerpDouble(currentPosition.dy, newPosition.dy, Curves.decelerate.transform(_t))!;
-        _positions[index] = Offset(newX, newY);
-        _opacities[index] = lerpDouble(_opacities[index] ?? 1.0, opacity, _t)!;
+        final newX = lerpDouble(currentPosition.dx, newPosition.dx, _t)!;
+        final newY = lerpDouble(currentPosition.dy, newPosition.dy, _t)!;
+
+        if (data != null) {
+          data = data.copyWith(
+            position: Offset(newX, newY),
+            opacity: lerpDouble(data.opacity, opacity, _t) ?? 1.0,
+          );
+          dotData[index] = data;
+        }
       }
 
-      setState(() {});
+      _dotData.value = Map<int, DotData>.from(dotData);
     }
 
     _animationControllerPosition.stop();
@@ -422,11 +394,11 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
   _animateDotsColor({
     Duration duration = Duration.zero,
     double t = 1.0,
-    MoveDirection moveDirection = MoveDirection.right,
+    PuzzleMoveDirection moveDirection = PuzzleMoveDirection.right,
   }) async {
     Color getDotColor(PuzzleDotModel dot) {
       Color color;
-      if (_model.imageMode) {
+      if (_model.value!.imageMode) {
         color = dot.imageColor;
       } else {
         if (dot.isNumber) {
@@ -442,42 +414,50 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
       return color;
     }
 
-    final pendingPoints = _model.dots.where((d) {
+    final pendingPoints = _model.value!.dots.where((d) {
       final index = d.globalCorrectTile.index;
-      final c = _colors[index];
+      final c = _dotData.value[index]?.color ?? Colors.transparent;
       final newColor = getDotColor(d);
       return c != newColor;
     }).toList();
 
     listener() {
       final _t = duration == Duration.zero ? t : _animationControllerColor.value;
+      final innerDots = _model.value!.innerDots;
 
       final dots = pendingPoints.where((dot) {
         switch (moveDirection) {
-          case MoveDirection.up:
+          case PuzzleMoveDirection.up:
             final y = dot.subTile.y + math.cos(dot.subTile.x);
-            final p = (y / _model.innerDots).clamp(0.0, 1.0);
+            final p = (y / innerDots).clamp(0.0, 1.0);
             return (1 - p) <= _t;
-          case MoveDirection.down:
+          case PuzzleMoveDirection.down:
             final y = dot.subTile.y + math.cos(dot.subTile.x);
-            final p = (y / _model.innerDots).clamp(0.0, 1.0);
+            final p = (y / innerDots).clamp(0.0, 1.0);
             return p <= _t;
-          case MoveDirection.left:
+          case PuzzleMoveDirection.left:
             final x = dot.subTile.x + math.sin(dot.subTile.y);
-            final p = (x / _model.innerDots).clamp(0.0, 1.0);
+            final p = (x / innerDots).clamp(0.0, 1.0);
             return (1 - p) <= _t;
-          case MoveDirection.right:
+          case PuzzleMoveDirection.right:
             final x = dot.subTile.x + math.sin(dot.subTile.y);
-            final p = (x / _model.innerDots).clamp(0.0, 1.0);
+            final p = (x / innerDots).clamp(0.0, 1.0);
             return p <= _t;
         }
       }).toList();
 
+      final dotData = _dotData.value;
       for (var dot in dots) {
         final index = dot.globalCorrectTile.index;
-        _colors[index] = getDotColor(dot);
+
+        if (dotData[index] != null) {
+          dotData[index] = dotData[index]!.copyWith(
+            color: getDotColor(dot),
+          );
+        }
       }
-      setState(() {});
+
+      _dotData.value = Map<int, DotData>.from(dotData);
     }
 
     _animationControllerColor.stop();
@@ -499,7 +479,7 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
   }) async {
     Color getDotColor(PuzzleDotModel dot) {
       Color color;
-      if (_model.imageMode) {
+      if (_model.value!.imageMode) {
         color = dot.imageColor;
       } else {
         if (dot.isNumber) {
@@ -517,24 +497,30 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
 
     listener() {
       final _t = duration == Duration.zero ? t : _animationControllerColor.value;
-      final center = Offset(
-        (_model.size * _model.innerDots * 0.5),
-        (_model.size * _model.innerDots * 0.5),
-      );
+      final size = _model.value!.size;
+      final innerDots = _model.value!.innerDots;
 
-      final dots = _model.dots.where((dot) {
+      final center = Offset((size * innerDots * 0.5), (size * innerDots * 0.5));
+
+      final dots = _model.value!.dots.where((dot) {
         final x = dot.globalCurrentTile.x;
         final y = dot.globalCurrentTile.y;
         final p = Offset(x.toDouble(), y.toDouble());
         final distance = (p - center).distance;
-        return (distance / (_model.size * _model.innerDots)) <= _t;
+        return (distance / (size * innerDots)) <= _t;
       }).toList();
 
+      final dotData = _dotData.value;
       for (var dot in dots) {
         final index = dot.globalCorrectTile.index;
-        _colors[index] = getDotColor(dot);
+        if (dotData[index] != null) {
+          dotData[index] = dotData[index]!.copyWith(
+            color: getDotColor(dot),
+          );
+        }
       }
-      setState(() {});
+
+      _dotData.value = Map<int, DotData>.from(dotData);
     }
 
     _animationControllerColor.stop();
@@ -550,83 +536,257 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> sort() async {
-    // if (_model.isCompleted) return;
-    // final PuzzleService service = GetIt.I.get();
-    // service.sort(_model);
-    // service.updateCorrectDotsColor(_model, _model.dots);
-    // await _animateDotsColor(duration: _moveDuration);
+  Future<void> explode({
+    Duration duration = Duration.zero,
+  }) async {
+    listener() {
+      final _t = duration == Duration.zero ? 1.0 : _animationControllerPosition.value;
+      const focusPosition = Offset(0.5, 0.5);
+
+      var dotData = _dotData.value;
+
+      for (var dot in _model.value!.dots) {
+        final index = dot.globalCorrectTile.index;
+        final data = dotData[index];
+        final currentPosition = data?.position ?? Offset.zero;
+        var newPosition = Offset(dot.currentPosition.x, dot.currentPosition.y);
+
+        final x = newPosition.dx - focusPosition.dx;
+        final y = newPosition.dy - focusPosition.dy;
+        final angle = math.atan(y / x) - (newPosition.dx < focusPosition.dx ? math.pi : 0.0);
+        newPosition = newPosition + Offset((math.cos(angle)), math.sin(angle));
+
+        final newX = lerpDouble(currentPosition.dx, newPosition.dx, _t)!;
+        final newY = lerpDouble(currentPosition.dy, newPosition.dy, _t)!;
+
+        if (data != null) {
+          dotData[index] = data.copyWith(
+            position: Offset(newX, newY),
+            opacity: lerpDouble(data.opacity, 0.0, _t) ?? 1.0,
+          );
+        }
+      }
+
+      _dotData.value = Map<int, DotData>.from(dotData);
+    }
+
+    _animationControllerPosition.stop();
+    _animationControllerPosition.reset();
+    _animationControllerPosition.clearListeners();
+
+    if (duration == Duration.zero) {
+      listener();
+    } else {
+      _animationControllerPosition.addListener(listener);
+      _animationControllerPosition.duration = duration;
+      await _animationControllerPosition.forward(from: 0.0);
+    }
+  }
+
+  sort() async {
+    final PuzzleService service = GetIt.I.get();
+    _model.value = service.sort(_model.value!);
+    widget.onChanged?.call(_model.value!);
+
+    _animateDotsPosition(duration: _moveDuration);
+    _animateDotsColor(duration: Duration.zero);
   }
 
   reset() {
     final PuzzleService service = GetIt.I.get();
-    _model = service.reset(_model);
-    widget.onChanged?.call(_model.moves, _model.correctTileCount);
+    _model.value = service.reset(_model.value!);
+    widget.onChanged?.call(_model.value!);
+
     _animateDotsPosition(duration: _moveDuration);
     _animateDotsColor(duration: Duration.zero);
   }
 
   convertToImage() {
-    if (_model.imageMode) return;
+    if (_model.value!.imageMode) return;
+
     final PuzzleService service = GetIt.I.get();
-    _model = service.convertToImage(_model);
+    _model.value = service.convertToImage(_model.value!);
     _animateToggleMode(duration: _colorDuration);
   }
 
   convertToNumbers() {
-    if (!_model.imageMode) return;
+    if (!_model.value!.imageMode) return;
+
     final PuzzleService service = GetIt.I.get();
-    _model = service.convertToNumbers(_model);
+    _model.value = service.convertToNumbers(_model.value!);
     _animateToggleMode(duration: _colorDuration);
+  }
+
+  _onPointerDown(Offset localPosition) {
+    _throttleEnabled = true;
+    _throttle.notify(localPosition);
+
+    EasyDebounce.cancel("fix");
+  }
+
+  _onPointerMove(Offset localPosition) {
+    _throttleEnabled = true;
+    _touchPosition = localPosition;
+    _throttle.value = localPosition;
+
+    EasyDebounce.debounce("fix", const Duration(milliseconds: 200), _fix);
+  }
+
+  _fix() {
+    _throttle.notify(_touchPosition);
+    _animateDotsPosition(
+      duration: _moveDuration,
+      focusPosition: _touchPosition,
+    );
+  }
+
+  _onPointerExit(Offset localPosition, {bool click = true}) async {
+    EasyDebounce.cancel("fix");
+
+    if (kIsWeb && click) {
+      _touchPosition = localPosition;
+    } else {
+      _touchPosition = null;
+    }
+
+    _throttleEnabled = false;
+    _throttle.notify(null);
+
+    if (click) {
+      _onTileClick(localPosition);
+    } else {
+      _animateDotsPosition(duration: _touchDownDuration);
+    }
+
+    _touchStartAt = null;
+  }
+
+  void _handleKeyEvent(RawKeyEvent event) {
+    if (_model.value == null) return;
+    if (_model.value!.isCompleted) return;
+
+    if (event is RawKeyDownEvent) {
+      final physicalKey = event.data.physicalKey;
+      final white = _model.value?.whiteTilePosition;
+      if (white == null) return;
+
+      PositionModel<int>? pos;
+      if (physicalKey == PhysicalKeyboardKey.arrowDown) {
+        if (white.y == 0) return;
+        pos = PositionModel(x: white.x, y: white.y - 1);
+      } else if (physicalKey == PhysicalKeyboardKey.arrowUp) {
+        if (white.y == _model.value!.size - 1) return;
+        pos = PositionModel(x: white.x, y: white.y + 1);
+      } else if (physicalKey == PhysicalKeyboardKey.arrowRight) {
+        if (white.x == 0) return;
+        pos = PositionModel(x: white.x - 1, y: white.y);
+      } else if (physicalKey == PhysicalKeyboardKey.arrowLeft) {
+        if (white.x == _model.value!.size - 1) return;
+        pos = PositionModel(x: white.x + 1, y: white.y);
+      }
+
+      if (pos == null) return;
+
+      _throttleEnabled = false;
+      _throttle.notify(null);
+
+      final PuzzleService service = GetIt.I.get();
+      final moveResult = service.move(_model.value!, pos.x, pos.y);
+      _model.value = moveResult.model;
+
+      if (moveResult.newIncorrectDots.isNotEmpty || moveResult.newCorrectDots.isNotEmpty) {
+        _animateDotsColor(
+          duration: _colorDuration,
+          moveDirection: moveResult.moveDirection ?? PuzzleMoveDirection.left,
+        );
+      }
+
+      // Restore positions
+      _animateDotsPosition(duration: _moveDuration);
+
+      widget.onPuzzleTap?.call(
+        model: _model.value!,
+        position: pos,
+        moved: moveResult.moveDirection != null,
+        successMoved: moveResult.newCorrectDots.isNotEmpty,
+      );
+
+      widget.onChanged?.call(_model.value!);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        _constraints = constraints;
-        return MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onEnter: (e) {
-            if (kIsWeb) {
-              _throttle.value = e.localPosition;
-            }
-          },
-          onHover: (e) {
-            if (kIsWeb) {
-              _throttle.value = e.localPosition;
-            }
-          },
-          onExit: (e) {
-            if (kIsWeb) {
-              _throttle.setValue(null);
-              _onPointerExit();
-            }
-          },
-          child: Listener(
-            onPointerDown: (e) {
-              _throttle.value = e.localPosition;
-            },
-            onPointerMove: (e) {
-              _throttle.value = e.localPosition;
-            },
-            onPointerUp: (e) {
-              _throttle.setValue(null);
-              _onPointerUp(close: !kIsWeb);
-            },
-            child: CustomPaint(
-              willChange: true,
-              painter: PuzzleDotsPainter(
-                puzzle: _model,
-                colors: _colors,
-                positions: _positions,
-                opacities: _opacities,
+    return RawKeyboardListener(
+      focusNode: _focusNode,
+      onKey: _handleKeyEvent,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (!_focusNode.hasFocus) {
+            FocusScope.of(context).requestFocus(_focusNode);
+          }
+
+          _constraints = constraints;
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: MultiValueListenableBuilder(
+                  valueListenables: [_model, _dotData],
+                  builder: (context, values, child) => CustomPaint(
+                    willChange: true,
+                    painter: PuzzleDotsPainter(
+                      puzzle: _model.value!,
+                      dotData: _dotData.value,
+                    ),
+                    child: Container(color: Colors.transparent),
+                  ),
+                ),
               ),
-              child: Container(color: Colors.transparent),
-            ),
-          ),
-        );
-      },
+              Positioned.fill(
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  onEnter: !kIsWeb ? null : (e) => _onPointerDown(e.localPosition),
+                  onHover: !kIsWeb ? null : (e) => _onPointerMove(e.localPosition),
+                  onExit: !kIsWeb ? null : (e) => _onPointerExit(e.localPosition, click: false),
+                  child: Listener(
+                    onPointerDown: (e) => _onPointerDown(e.localPosition),
+                    onPointerMove: (e) => _onPointerMove(e.localPosition),
+                    onPointerUp: (e) => _onPointerExit(e.localPosition),
+                    child: Container(color: Colors.transparent),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
+}
+
+class DotData extends Equatable {
+  final double opacity;
+  final Color color;
+  final Offset position;
+
+  const DotData({
+    required this.opacity,
+    required this.color,
+    required this.position,
+  });
+
+  DotData copyWith({
+    double? opacity,
+    Offset? position,
+    Color? color,
+  }) {
+    return DotData(
+      opacity: opacity ?? this.opacity,
+      color: color ?? this.color,
+      position: position ?? this.position,
+    );
+  }
+
+  @override
+  List<Object?> get props => [opacity, color, position];
 }

@@ -26,4 +26,8 @@ class PuzzleController {
   bool get imageMode {
     return _state?.imageMode ?? false;
   }
+
+  Future<void> explode({Duration duration = Duration.zero}) async {
+    await _state?.explode(duration: duration);
+  }
 }

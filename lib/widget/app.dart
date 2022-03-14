@@ -1,5 +1,5 @@
-import 'package:dot_puzzle/widget/screen/splash/index.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'screen/home/index.dart';
 
@@ -14,8 +14,11 @@ class _CustomAppState extends State<CustomApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       home: const ScreenHome(),
-      theme: ThemeData.dark(),
+      theme: ThemeData.dark().copyWith(
+        textTheme: GoogleFonts.pressStart2pTextTheme(ThemeData.dark().textTheme),
+      ),
     );
   }
 }
