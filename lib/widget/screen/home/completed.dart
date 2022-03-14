@@ -1,7 +1,7 @@
 import 'package:confetti/confetti.dart';
 import 'package:dot_puzzle/widget/common/animated_dot_digit/number.dart';
 import 'package:dot_puzzle/widget/common/animated_fade_visibility/index.dart';
-import 'package:dot_puzzle/widget/common/dot_button/index.dart';
+import 'package:dot_puzzle/widget/common/button/index.dart';
 import 'package:flutter/material.dart';
 
 class PuzzleCompleted extends StatefulWidget {
@@ -145,10 +145,10 @@ class _PuzzleCompletedState extends State<PuzzleCompleted> {
                   ],
                 ),
                 const SizedBox(height: 32),
-                DotButton(
-                  width: 180,
-                  height: 40,
-                  child: const Text("PLAY AGAIN"),
+                CustomButton(
+                  text: "PLAY AGAIN",
+                  color: Colors.grey.shade800,
+                  textColor: Colors.white,
                   onPressed: widget.onPlayAgainPressed,
                 )
               ],

@@ -14,6 +14,7 @@ class _CustomAppState extends State<CustomApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      title: "Flutter Dot Puzzle",
       debugShowCheckedModeBanner: false,
       home: const ScreenHome(),
       theme: ThemeData.dark().copyWith(

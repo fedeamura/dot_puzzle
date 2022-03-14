@@ -65,10 +65,12 @@ class _ScreenHomeState extends State<ScreenHome> {
 
         _puzzleController.shuffle();
       },
-      onReady: () => setState(() {
-        _counting = false;
-        _countDownVisible = false;
-      }),
+      onReady: () {
+        setState(() {
+          _counting = false;
+          _countDownVisible = false;
+        });
+      },
     );
   }
 
@@ -78,6 +80,7 @@ class _ScreenHomeState extends State<ScreenHome> {
     } else {
       _puzzleController.convertToImage();
     }
+    setState(() {});
   }
 
   _onPuzzleTap({
@@ -141,6 +144,7 @@ class _ScreenHomeState extends State<ScreenHome> {
                   leftPanel: ScreenHomePanel(
                     moves: _moves,
                     correct: _correct,
+                    imageMode: _puzzleController.imageMode,
                     onResetPressed: _onButtonShufflePressed,
                     onSortPressed: _onButtonSortPressed,
                     onImagePressed: _onButtonTogglePressed,
@@ -148,6 +152,7 @@ class _ScreenHomeState extends State<ScreenHome> {
                   bottomPanel: ScreenHomePanel(
                     moves: _moves,
                     correct: _correct,
+                    imageMode: _puzzleController.imageMode,
                     onResetPressed: _onButtonShufflePressed,
                     onSortPressed: _onButtonSortPressed,
                     onImagePressed: _onButtonTogglePressed,

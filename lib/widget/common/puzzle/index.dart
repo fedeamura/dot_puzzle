@@ -632,22 +632,10 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
     EasyDebounce.debounce("fix", const Duration(milliseconds: 200), _fix);
   }
 
-  _fix() {
-    _throttle.notify(_touchPosition);
-    _animateDotsPosition(
-      duration: _moveDuration,
-      focusPosition: _touchPosition,
-    );
-  }
-
-  _onPointerExit(Offset localPosition, {bool click = true, bool touch = false}) async {
+  _onPointerExit(Offset localPosition, {bool click = true}) async {
     EasyDebounce.cancel("fix");
 
-    if (!touch && click) {
-      _touchPosition = localPosition;
-    } else {
-      _touchPosition = null;
-    }
+    _touchPosition = null;
 
     _throttleEnabled = false;
     _throttle.notify(null);
@@ -659,6 +647,13 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
     }
 
     _touchStartAt = null;
+  }
+
+  _fix() {
+    _throttle.notify(null);
+    _throttleEnabled = false;
+
+    _animateDotsPosition(duration: _moveDuration);
   }
 
   void _handleKeyEvent(RawKeyEvent event) {
@@ -747,11 +742,11 @@ class PuzzleState extends State<Puzzle> with TickerProviderStateMixin {
                   cursor: SystemMouseCursors.click,
                   onEnter: !kIsWeb ? null : (e) => _onPointerDown(e.localPosition),
                   onHover: !kIsWeb ? null : (e) => _onPointerMove(e.localPosition),
-                  onExit: !kIsWeb ? null : (e) => _onPointerExit(e.localPosition, click: false, touch: false),
+                  onExit: !kIsWeb ? null : (e) => _onPointerExit(e.localPosition, click: false),
                   child: Listener(
                     onPointerDown: (e) => _onPointerDown(e.localPosition),
                     onPointerMove: (e) => _onPointerMove(e.localPosition),
-                    onPointerUp: (e) => _onPointerExit(e.localPosition, touch: e.kind == PointerDeviceKind.touch),
+                    onPointerUp: (e) => _onPointerExit(e.localPosition),
                     child: Container(color: Colors.transparent),
                   ),
                 ),

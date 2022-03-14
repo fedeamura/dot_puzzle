@@ -1,13 +1,13 @@
 import 'package:dot_puzzle/core/responsive.dart';
 import 'package:dot_puzzle/widget/common/animated_dot_digit/index.dart';
-import 'package:dot_puzzle/widget/common/dot_button/index.dart';
+import 'package:dot_puzzle/widget/common/button/index.dart';
 import 'package:flutter/material.dart';
 
 class ScreenHomePanel extends StatelessWidget {
   final Function()? onResetPressed;
   final Function()? onSortPressed;
   final Function()? onImagePressed;
-
+  final bool imageMode;
   final int moves;
   final int correct;
 
@@ -18,6 +18,7 @@ class ScreenHomePanel extends StatelessWidget {
     this.correct = 0,
     this.onSortPressed,
     this.onImagePressed,
+    this.imageMode = false,
   }) : super(key: key);
 
   @override
@@ -98,25 +99,25 @@ class ScreenHomePanel extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    DotButton(
-                      width: (constraints.maxWidth * 0.4).clamp(0.0, 150.0),
-                      height: 40,
+                    CustomButton(
+                      text: "RESET",
                       onPressed: onResetPressed,
-                      child: const Text("RESET"),
+                      textColor: Colors.white,
+                      color: Colors.grey.shade800,
                     ),
                     const SizedBox(width: 16.0),
-                    // DotButton(
-                    //   width: (constraints.maxWidth * 0.4).clamp(0.0, 150.0),
-                    //   height: 40,
+                    // CustomButton(
+                    //   text: "SORT",
                     //   onPressed: onSortPressed,
-                    //   child: const Text("SORT"),
+                    //   textColor: Colors.white,
+                    //   color: Colors.grey.shade800,
                     // ),
                     // const SizedBox(width: 16.0),
-                    DotButton(
-                      width: (constraints.maxWidth * 0.4).clamp(0.0, 150.0),
-                      height: 40,
+                    CustomButton(
+                      text: "IMAGE",
                       onPressed: onImagePressed,
-                      child: const Text("TOGGLE"),
+                      textColor: imageMode ? Colors.black : Colors.white,
+                      color: imageMode ? Colors.white : Colors.grey.shade800,
                     ),
                   ],
                 ),
